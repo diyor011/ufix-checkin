@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import sqlite3, requests, os, threading, time
+import sqlite3, requests, os, threading, time, asyncio
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -314,8 +314,18 @@ def keep_alive():
         except Exception as e:
             print(f"[KEEP-ALIVE ERROR] {e}")
 
+def run_bots():
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from aiogram import Bot, Dispatcher
+    import bot as bot_module
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(bot_module.main())
+
 if __name__ == "__main__":
     threading.Thread(target=keep_alive, daemon=True).start()
-    print("✅ Server started on http://localhost:5000")
+    threading.Thread(target=run_bots, daemon=True).start()
+    print("✅ Server + Bots started")
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
