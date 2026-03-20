@@ -4,6 +4,9 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ForceReply
 import aiosqlite
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+UZB_TZ = ZoneInfo("Asia/Tashkent")
 
 # -------- TOKENS --------
 WORKER_BOT_TOKEN  = "8714366872:AAFmKwU-T2E_JMqDUz_xv23PEko5LeHWfOw"
@@ -229,7 +232,7 @@ async def worker_handler(message: types.Message):
             await message.answer("❗ Please select an employee first.", reply_markup=employees_keyboard())
             return
 
-        now      = datetime.now()
+        now      = datetime.now(UZB_TZ)
         time_str = now.strftime("%H:%M")
 
         async with aiosqlite.connect(DB) as db:
@@ -258,12 +261,12 @@ async def worker_handler(message: types.Message):
 
         late        = calc_late_minutes(shift_start, now)
         week        = get_month_key(now)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
 
         async with aiosqlite.connect(DB) as db:
             await db.execute(
                 "INSERT INTO attendance (employee_id, checkin, late, week) VALUES (?,?,?,?)",
-                (emp[0], now.isoformat(), late, week))
+                (emp[0], now.replace(tzinfo=None).isoformat(), late, week))
             await db.commit()
             cursor = await db.execute(
                 "SELECT SUM(late) FROM attendance WHERE employee_id=? AND week=? AND checkin>=?",
@@ -313,7 +316,7 @@ async def worker_handler(message: types.Message):
             await message.answer("❗ Employee not found.")
             return
 
-        now      = datetime.now()
+        now      = datetime.now(UZB_TZ)
         time_str = now.strftime("%H:%M")
 
         shift_start, shift_end = get_shift_times(emp, now)
@@ -333,7 +336,8 @@ async def worker_handler(message: types.Message):
             if row:
                 record_id, checkin_str = row
                 checkin_dt     = datetime.fromisoformat(checkin_str)
-                worked_minutes = int((now - checkin_dt).total_seconds() / 60)
+                now_naive      = now.replace(tzinfo=None)
+                worked_minutes = int((now_naive - checkin_dt).total_seconds() / 60)
                 worked_h, worked_m = worked_minutes // 60, worked_minutes % 60
                 early_minutes  = int((shift_end - now).total_seconds() / 60) if now < shift_end else 0
                 if early_minutes >= 60:
@@ -344,7 +348,7 @@ async def worker_handler(message: types.Message):
                 else:
                     early_msg = ""
 
-                await db.execute("UPDATE attendance SET checkout=? WHERE id=?", (now.isoformat(), record_id))
+                await db.execute("UPDATE attendance SET checkout=? WHERE id=?", (now.replace(tzinfo=None).isoformat(), record_id))
                 await db.commit()
 
                 await message.answer(
@@ -424,9 +428,9 @@ async def manager_handler(message: types.Message):
             await message.answer("❌ Employee not found.")
             return
 
-        now         = datetime.now()
+        now         = datetime.now(UZB_TZ)
         month       = get_month_key(now)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
 
         async with aiosqlite.connect(DB) as db:
             cursor = await db.execute(
@@ -626,9 +630,9 @@ async def manager_handler(message: types.Message):
 # ======================================================
 
 async def send_report_to_all(on_demand=False):
-    now         = datetime.now()
+    now         = datetime.now(UZB_TZ)
     month       = get_month_key(now)
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
     label       = " (on demand)" if on_demand else ""
 
     lines = [
@@ -681,9 +685,9 @@ async def send_report_to_all(on_demand=False):
 # ======================================================
 
 async def send_fine_report_to_all():
-    now         = datetime.now()
+    now         = datetime.now(UZB_TZ)
     month       = get_month_key(now)
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
 
     lines = [
         "💰 FINE REPORT",
@@ -736,7 +740,7 @@ async def check_no_shows():
     alerted = set()
     while True:
         await asyncio.sleep(60)
-        now = datetime.now()
+        now = datetime.now(UZB_TZ)
         async with aiosqlite.connect(DB) as db:
             for emp in employees:
                 shift_start, _ = get_shift_times(emp, now)
@@ -770,11 +774,11 @@ async def check_no_shows():
 
 async def monthly_report_scheduler():
     while True:
-        now = datetime.now()
+        now = datetime.now(UZB_TZ)
         if now.month == 12:
-            next_month = now.replace(year=now.year+1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            next_month = now.replace(year=now.year+1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         else:
-            next_month = now.replace(month=now.month+1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            next_month = now.replace(month=now.month+1, day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         last_day = (next_month - timedelta(seconds=1)).replace(hour=23, minute=59, second=0, microsecond=0)
         wait = (last_day - now).total_seconds()
         if wait <= 0:
