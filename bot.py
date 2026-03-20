@@ -50,10 +50,10 @@ async def init_db():
             shift TEXT,
             off_day TEXT DEFAULT 'None'
         )""")
-        try:
+        cursor = await db.execute("PRAGMA table_info(employees)")
+        cols = [row[1] for row in await cursor.fetchall()]
+        if 'off_day' not in cols:
             await db.execute("ALTER TABLE employees ADD COLUMN off_day TEXT DEFAULT 'None'")
-        except:
-            pass
         await db.commit()
 
         cursor = await db.execute("SELECT COUNT(*) FROM employees")
@@ -189,10 +189,16 @@ def get_shift_times(emp, now):
         end   = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     else:
         # Night shift 00:00–08:00
+        # If it is between 20:00-23:59 — shift starts tomorrow at 00:00
+        # If it is between 00:00-08:00 — shift started today at 00:00
+        # Otherwise — use today 00:00 as reference
         if now.hour >= 20:
             start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        else:
+        elif now.hour < 8:
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            # Between 08:00-20:00 — next night shift starts tonight at 00:00 (tomorrow)
+            start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(hours=8)
     return start, end
 
@@ -543,7 +549,7 @@ async def manager_handler(message: types.Message):
             emp_by_id[emp_id]                   = new_emp
             emp_by_name[name.lower()]            = new_emp
             async with aiosqlite.connect(DB) as db:
-                await db.execute("INSERT OR REPLACE INTO employees VALUES (?,?,?,?)", (emp_id, name, shift, off_day))
+                await db.execute("INSERT INTO employees (id, name, shift, off_day) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, shift=excluded.shift, off_day=excluded.off_day", (emp_id, name, shift, off_day))
                 await db.commit()
             manager_state.pop(uid, None)
             await message.answer(
