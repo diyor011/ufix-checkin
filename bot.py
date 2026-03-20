@@ -21,7 +21,7 @@ manager_dp = Dispatcher()
 
 DB         = "attendance.db"
 user_state = {}
-# update
+
 employees = [
     ("#A770", "Abdulloh", "16:00", "Main: 16:00 - 00:00"),
     ("#L470", "Mubina",   "00:00", "Night: 00:00 - 08:00"),
