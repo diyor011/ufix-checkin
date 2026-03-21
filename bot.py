@@ -159,7 +159,13 @@ def get_shift_times(emp, now):
     return start, end
 
 def calc_late(shift_start, now):
-    return max(int((now - shift_start).total_seconds() / 60), 0)
+    """Опоздание в минутах. 0 если пришёл вовремя или раньше."""
+    diff = int((now - shift_start).total_seconds() / 60)
+    if diff <= 0:
+        return 0   # пришёл вовремя или раньше
+    if diff > 480:
+        return 0   # больше 8 часов — значит смена уже прошла, не считаем
+    return diff
 
 # ======================================================
 # КЛАВИАТУРЫ
@@ -340,8 +346,8 @@ async def w_handler(message: types.Message):
                 (emp[0], now.isoformat(), late, week))
             await db.commit()
             cur = await db.execute(
-                "SELECT SUM(late) FROM attendance WHERE employee_id=? AND week=? AND checkin>=?",
-                (emp[0], week, month_start.isoformat()))
+                "SELECT SUM(late) FROM attendance WHERE employee_id=? AND checkin>=?",
+                (emp[0], month_start.isoformat()))
             row            = await cur.fetchone()
             total_mo_late  = row[0] or 0
 
@@ -357,13 +363,13 @@ async def w_handler(message: types.Message):
             f"📊 Monthly late: {format_duration(total_mo_late)}\n"
             f"💰 Monthly fine: ${total_mo_late}")
 
+        late_status = f"⏰ Late: {late} min  💸 Fine: ${late}" if late > 0 else "✅ On time"
         await notify_managers(
-            f"{late_emoji} CHECK-IN\n\n"
+            f"🟢 CHECK-IN\n\n"
             f"👤 {emp[1]} {emp[0]}\n"
             f"🕒 Time: {time_str}\n"
             f"📋 Shift: {emp[3]}\n"
-            f"⏰ {late_msg}\n"
-            f"💸 Fine today: ${late}\n"
+            f"{late_status}\n"
             f"📊 Monthly late: {format_duration(total_mo_late)}\n"
             f"💰 Monthly fine: ${total_mo_late}")
         return
@@ -426,6 +432,7 @@ async def w_handler(message: types.Message):
             f"🔴 CHECK-OUT\n\n"
             f"👤 {emp[1]} {emp[0]}\n"
             f"🕒 Time: {time_str}\n"
+            f"📋 Shift: {emp[3]}\n"
             f"⏱ Worked: {worked_h}h {worked_m}min{early_msg}")
 
         user_state.pop(uid, None)
@@ -437,10 +444,12 @@ async def w_handler(message: types.Message):
 
 @manager_dp.message(CommandStart())
 async def m_start(message: types.Message):
-    if message.from_user.id not in MANAGER_IDS:
-        await message.answer("⛔ Access denied.")
+    uid = message.from_user.id
+    print(f"[MANAGER /start] uid={uid}, allowed={uid in MANAGER_IDS}")
+    if uid not in MANAGER_IDS:
+        await message.answer(f"⛔ Access denied. Your ID: {uid}")
         return
-    manager_state.pop(message.from_user.id, None)
+    manager_state.pop(uid, None)
     await message.answer("👋 Manager Panel\nSelect action:", reply_markup=kb_manager_menu())
 
 @manager_dp.message(Command("report"))
@@ -455,8 +464,10 @@ async def m_handler(message: types.Message):
     text = message.text or ""
     uid  = message.from_user.id
 
+    print(f"[MANAGER] msg from uid={uid}, text={repr(text)}, MANAGER_IDS={MANAGER_IDS}, allowed={uid in MANAGER_IDS}")
+
     if uid not in MANAGER_IDS:
-        await message.answer("⛔ Access denied.")
+        await message.answer(f"⛔ Access denied. Your ID: {uid}")
         return
 
     state = manager_state.get(uid, {})
