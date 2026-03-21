@@ -510,8 +510,8 @@ async def m_handler(message: types.Message):
         async with aiosqlite.connect(DB) as db:
             cur  = await db.execute(
                 "SELECT checkin, checkout, late FROM attendance "
-                "WHERE employee_id=? AND week=? AND checkin>=? ORDER BY checkin ASC",
-                (emp[0], month, month_start.isoformat()))
+                "WHERE employee_id=? AND checkin>=? ORDER BY checkin ASC",
+                (emp[0], month_start.isoformat()))
             rows = await cur.fetchall()
 
         if not rows:
@@ -691,42 +691,72 @@ async def m_handler(message: types.Message):
 
 async def send_report_to_all(on_demand=False):
     now         = now_uzb()
-    month       = get_month_key(now)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     label       = " (on demand)" if on_demand else ""
 
     lines = [
         f"📊 MONTHLY REPORT{label}",
         f"🗓 {month_start.strftime('%B %Y')}",
-        "―" * 30,
+        f"📅 Generated: {now.strftime('%d.%m.%Y %H:%M')}",
+        "―" * 32,
     ]
+
+    grand_total_fine = 0
 
     async with aiosqlite.connect(DB) as db:
         for emp in employees:
+            off_day = emp[4] if len(emp) > 4 else "None"
+            off_show = off_day if off_day not in ("None",) else "No day off"
+
+            # Все записи за месяц
             cur = await db.execute(
-                "SELECT COUNT(*), SUM(late) FROM attendance WHERE employee_id=? AND week=? AND checkin>=?",
-                (emp[0], month, month_start.isoformat()))
-            row        = await cur.fetchone()
-            shifts     = row[0] or 0
-            total_late = row[1] or 0
+                "SELECT checkin, checkout, late FROM attendance "
+                "WHERE employee_id=? AND checkin>=? ORDER BY checkin ASC",
+                (emp[0], month_start.isoformat()))
+            rows = await cur.fetchall()
+
+            shifts     = len(rows)
+            total_late = sum(r[2] or 0 for r in rows)
+            grand_total_fine += total_late
+
+            # Статус онлайн
+            cur2 = await db.execute(
+                "SELECT id FROM attendance WHERE employee_id=? AND checkout IS NULL ORDER BY id DESC LIMIT 1",
+                (emp[0],))
+            active = await cur2.fetchone()
+            status = "🟢 Online" if active else "⚫ Offline"
 
             lines.append(
-                f"\n👤 {emp[1]} {emp[0]}\n"
-                f"   Shifts: {shifts}  |  Late: {format_duration(total_late)}\n"
-                f"   💰 Fine: ${total_late}")
+                f"\n👤 {emp[1]} {emp[0]}  {status}\n"
+                f"   📋 Shift: {emp[3]}\n"
+                f"   🗓 Off day: {off_show}\n"
+                f"   📆 Shifts this month: {shifts}\n"
+                f"   ⏱ Total late: {format_duration(total_late)}\n"
+                f"   💰 Total fine: ${total_late}"
+            )
 
-            cur2     = await db.execute(
-                "SELECT checkin, late FROM attendance "
-                "WHERE employee_id=? AND week=? AND checkin>=? AND late>0 ORDER BY checkin ASC",
-                (emp[0], month, month_start.isoformat()))
-            day_rows = await cur2.fetchall()
-            if day_rows:
-                lines.append("   ── Late days ──")
-                for checkin_str, late in day_rows:
-                    ci = datetime.fromisoformat(checkin_str)
-                    lines.append(f"   📅 {ci.strftime('%a %d.%m')}  {ci.strftime('%H:%M')}  +{late}min  💸${late}")
+            if rows:
+                lines.append("   ――――――――――――――――――――――")
+                accumulated = 0
+                for checkin_str, checkout_str, late in rows:
+                    ci  = datetime.fromisoformat(checkin_str)
+                    co  = datetime.fromisoformat(checkout_str) if checkout_str else None
+                    late = late or 0
+                    accumulated += late
+                    late_str = f"⏰ +{late}min late" if late > 0 else "✅ On time"
+                    co_str   = co.strftime('%H:%M') if co else "active"
+                    lines.append(
+                        f"   📅 {ci.strftime('%a %d.%m')}  "
+                        f"{ci.strftime('%H:%M')}→{co_str}  "
+                        f"{late_str}  "
+                        f"💸 accum: ${accumulated}"
+                    )
 
-    lines += ["―" * 30, f"📅 {now.strftime('%d.%m.%Y %H:%M')}"]
+    lines += [
+        "\n" + "―" * 32,
+        f"💰 TOTAL FINES ALL: ${grand_total_fine}",
+        f"📅 {now.strftime('%d.%m.%Y %H:%M')}",
+    ]
     text_out = "\n".join(lines)
 
     await notify_managers(text_out)
@@ -747,8 +777,8 @@ async def send_fine_report_to_all():
     async with aiosqlite.connect(DB) as db:
         for emp in employees:
             cur  = await db.execute(
-                "SELECT checkin, late FROM attendance WHERE employee_id=? AND week=? AND checkin>=? ORDER BY checkin ASC",
-                (emp[0], month, month_start.isoformat()))
+                "SELECT checkin, late FROM attendance WHERE employee_id=? AND checkin>=? ORDER BY checkin ASC",
+                (emp[0], month_start.isoformat()))
             rows       = await cur.fetchall()
             total_late = sum(r[1] or 0 for r in rows)
             total_all += total_late
