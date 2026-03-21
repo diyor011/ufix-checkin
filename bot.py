@@ -328,15 +328,8 @@ async def w_handler(message: types.Message):
             await message.answer(f"🌴 {emp[1]} has day off today ({today_name})!\nCheck-in not allowed.")
             return
 
-        # Время смены
+        # Время смены — без ограничений по времени
         shift_start, shift_end = get_shift_times(emp, now)
-        if not (shift_start - timedelta(hours=1) <= now <= shift_end):
-            await message.answer(
-                f"⛔ Check-in not allowed now!\n"
-                f"📋 Shift: {emp[3]}\n"
-                f"🕐 {shift_start.strftime('%H:%M')} — {shift_end.strftime('%H:%M')}")
-            return
-
         late        = calc_late(shift_start, now)
         week        = get_month_key(now)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -393,12 +386,6 @@ async def w_handler(message: types.Message):
         time_str = now.strftime("%H:%M")
 
         shift_start, shift_end = get_shift_times(emp, now)
-        if not (shift_start <= now <= shift_end + timedelta(minutes=30)):
-            await message.answer(
-                f"⛔ Check-out not allowed now!\n"
-                f"📋 Shift: {emp[3]}\n"
-                f"🕐 {shift_start.strftime('%H:%M')} — {shift_end.strftime('%H:%M')}")
-            return
 
         async with aiosqlite.connect(DB) as db:
             cur = await db.execute(
