@@ -199,7 +199,7 @@ def kb_manager_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📊 Report"),       KeyboardButton(text="📋 History")],
-            [KeyboardButton(text="💰 Fine Report"),  KeyboardButton(text="✏️ Edit Off Day")],
+            [KeyboardButton(text="💰 Fine Report"),  KeyboardButton(text="📅 Off Days")],
             [KeyboardButton(text="➕ Add Employee"), KeyboardButton(text="❌ Remove Employee")],
         ],
         resize_keyboard=True,
@@ -227,11 +227,13 @@ def kb_remove():
     buttons.append([KeyboardButton(text="🔙 Cancel")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-def kb_edit_offday():
+def kb_offdays():
+    """Список сотрудников с их выходными — для просмотра и редактирования."""
     buttons = []
     for e in employees:
         off = e[4] if len(e) > 4 else "None"
-        buttons.append([KeyboardButton(text=f"✏️ {e[1]} {e[0]} [{off}]")])
+        off_label = "🟢 " + off if off not in ("None", "No day off") else "⚪ No day off"
+        buttons.append([KeyboardButton(text=f"{e[1]} {e[0]} — {off_label}")])
     buttons.append([KeyboardButton(text="🔙 Cancel")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
@@ -634,25 +636,37 @@ async def m_handler(message: types.Message):
         await message.answer(f"✅ Removed: {emp[1]} {emp[0]}", reply_markup=kb_manager_menu())
         return
 
-    # ── EDIT OFF DAY ──────────────────────────────────────
-    if text == "✏️ Edit Off Day":
-        manager_state[uid] = {"mode": "edit_offday"}
-        await message.answer("Select employee:", reply_markup=kb_edit_offday())
+    # ── OFF DAYS — просмотр и редактирование ─────────────
+    if text == "📅 Off Days":
+        now   = now_uzb()
+        today = now.strftime("%A")
+        lines = ["📅 OFF DAYS SCHEDULE", "―" * 30]
+        for e in employees:
+            off      = e[4] if len(e) > 4 else "None"
+            off_show = off if off != "None" else "No day off"
+            marker   = "  🔴 TODAY" if off == today else ""
+            lines.append(f"👤 {e[1]} {e[0]}\n   📋 {e[3]}\n   🗓 {off_show}{marker}")
+        await message.answer("\n\n".join(lines) + "\n\n" + "―"*30 + "\nTap to change off day:", reply_markup=kb_offdays())
+        manager_state[uid] = {"mode": "offdays"}
         return
 
-    if state.get("mode") == "edit_offday" and text.startswith("✏️ "):
-        raw      = text[2:].strip()
-        bracket  = raw.rfind("[")
-        fullname = raw[:bracket].strip() if bracket != -1 else raw
-        emp      = emp_by_fullname.get(fullname)
+    if state.get("mode") == "offdays":
+        emp = None
+        for e in employees:
+            if text.startswith(f"{e[1]} {e[0]}"):
+                emp = e
+                break
         if not emp:
             await message.answer("❌ Not found.")
             return
-        manager_state[uid] = {"mode": "edit_offday_pick", "emp": emp}
-        await message.answer(f"👤 {emp[1]} {emp[0]}\nSelect new off day:", reply_markup=kb_days())
+        manager_state[uid] = {"mode": "offdays_pick", "emp": emp}
+        off = emp[4] if len(emp) > 4 else "None"
+        await message.answer(
+            f"👤 {emp[1]} {emp[0]}\n📋 Shift: {emp[3]}\n🗓 Current off day: {off}\n\nSelect new off day:",
+            reply_markup=kb_days())
         return
 
-    if state.get("mode") == "edit_offday_pick":
+    if state.get("mode") == "offdays_pick":
         valid_days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday","No day off"]
         if text not in valid_days:
             await message.answer("❌ Use the buttons.")
@@ -664,7 +678,7 @@ async def m_handler(message: types.Message):
         await load_employees_from_db()
         manager_state.pop(uid, None)
         await message.answer(
-            f"✅ Updated!\n👤 {emp[1]} {emp[0]}\n🗓 Off day: {text}",
+            f"✅ Updated!\n👤 {emp[1]} {emp[0]}\n🗓 New off day: {text}",
             reply_markup=kb_manager_menu())
         return
 
