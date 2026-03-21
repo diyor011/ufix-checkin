@@ -334,8 +334,16 @@ async def w_handler(message: types.Message):
             await message.answer(f"🌴 {emp[1]} has day off today ({today_name})!\nCheck-in not allowed.")
             return
 
-        # Время смены — без ограничений по времени
+        # Check-in разрешён за 2 часа до начала смены
         shift_start, shift_end = get_shift_times(emp, now)
+        earliest_checkin = shift_start - timedelta(hours=2)
+        if now < earliest_checkin:
+            await message.answer(
+                f"⛔ Too early to check in!\n"
+                f"📋 Shift: {emp[3]}\n"
+                f"🕐 Shift starts: {shift_start.strftime('%H:%M')}\n"
+                f"✅ Check-in opens: {earliest_checkin.strftime('%H:%M')}")
+            return
         late        = calc_late(shift_start, now)
         week        = get_month_key(now)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
