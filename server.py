@@ -15,12 +15,10 @@ BUILD_DIR = os.path.join(BASE_DIR, "frontend", "dist")
 app = Flask(__name__, static_folder=BUILD_DIR, static_url_path="")
 CORS(app)
 
-# ── Замени [YOUR-PASSWORD] на свой пароль ──────────────────────────────────
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql://postgres:[YOUR-PASSWORD]@db.vwqsjayrinopywfmbuib.supabase.co:5432/postgres"
+    "postgresql://postgres:t0MZMJgou3NMnxuW@db.vwqsjayrinopywfmbuib.supabase.co:5432/postgres"
 )
-
 DEFAULT_EMPLOYEES = [
     ("#A770", "Abdulloh", "16:00", "None"),
     ("#L470", "Mubina",   "00:00", "None"),

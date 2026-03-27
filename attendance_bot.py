@@ -15,7 +15,7 @@ MANAGER_IDS = [8473394162]
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql://postgres:@db.vwqsjayrinopywfmbuib.supabase.co:5432/postgres"
+    "postgresql://postgres:t0MZMJgou3NMnxuW@db.vwqsjayrinopywfmbuib.supabase.co:5432/postgres"
 )
 
 worker_bot  = Bot(token=WORKER_BOT_TOKEN)
