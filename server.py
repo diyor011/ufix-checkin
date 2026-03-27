@@ -1,13 +1,25 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-import sqlite3, requests, os, threading, time, asyncio
+import psycopg2, psycopg2.extras, requests, os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
-app = Flask(__name__)
+UZB_TZ = ZoneInfo("Asia/Tashkent")
+
+def now_uzb():
+    return datetime.now(UZB_TZ).replace(tzinfo=None)
+
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+BUILD_DIR = os.path.join(BASE_DIR, "frontend", "dist")
+
+app = Flask(__name__, static_folder=BUILD_DIR, static_url_path="")
 CORS(app)
 
-# Путь к БД — всегда рядом с этим файлом
-DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attendance.db")
+# ── Замени [YOUR-PASSWORD] на свой пароль ──────────────────────────────────
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://postgres:[YOUR-PASSWORD]@db.vwqsjayrinopywfmbuib.supabase.co:5432/postgres"
+)
 
 DEFAULT_EMPLOYEES = [
     ("#A770", "Abdulloh", "16:00", "None"),
@@ -21,50 +33,57 @@ DEFAULT_EMPLOYEES = [
     ("#C333", "Abdulaziz","00:00", "None"),
 ]
 
+def get_db():
+    conn = psycopg2.connect(DATABASE_URL)
+    conn.autocommit = False
+    return conn
+
 def init_db():
-    conn = sqlite3.connect(DB)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS attendance(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance (
+            id          SERIAL PRIMARY KEY,
             employee_id TEXT,
-            checkin TEXT,
-            checkout TEXT,
-            late INTEGER,
-            week TEXT
-        )""")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS employees(
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            shift TEXT,
+            checkin     TEXT,
+            checkout    TEXT,
+            late        INTEGER,
+            week        TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS employees (
+            id      TEXT PRIMARY KEY,
+            name    TEXT,
+            shift   TEXT,
             off_day TEXT DEFAULT 'None'
-        )""")
-    try:
-        conn.execute("ALTER TABLE employees ADD COLUMN off_day TEXT DEFAULT 'None'")
-    except:
-        pass
-    count = conn.execute("SELECT COUNT(*) FROM employees").fetchone()[0]
-    if count == 0:
+        )
+    """)
+    cur.execute("SELECT COUNT(*) FROM employees")
+    if cur.fetchone()[0] == 0:
         for e in DEFAULT_EMPLOYEES:
-            conn.execute("INSERT OR IGNORE INTO employees VALUES (?,?,?,?)", e)
+            cur.execute(
+                "INSERT INTO employees (id, name, shift, off_day) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                e
+            )
     conn.commit()
-    conn.close()
-    print(f"[DB] Ready: {DB}")
+    cur.close(); conn.close()
+    print("[DB] PostgreSQL ready (Supabase)")
 
 init_db()
 
-# ── Telegram ─────────────────────────────────────────────
-BOT_TOKEN    = "8758406348:AAEjNIPMChEc1gZ3IQlh7aUCShVwutGHOFU"
-MANAGER_IDS  = ["5952683615", "39730332"]
+BOT_TOKEN   = "8758406348:AAEjNIPMChEc1gZ3IQlh7aUCShVwutGHOFU"
+MANAGER_IDS = ["5952683615", "39730332", "8473394162"]
 
 def tg_send(text):
     for cid in MANAGER_IDS:
         try:
             requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": cid, "text": text}, timeout=5)
+                json={"chat_id": cid, "text": text}, timeout=5
+            )
         except Exception as e:
-            print(f"[TG ERROR] {e}")
+            print(f"[TG] {e}")
 
 def tg_photo(photo_bytes, caption):
     for cid in MANAGER_IDS:
@@ -72,16 +91,10 @@ def tg_photo(photo_bytes, caption):
             requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
                 data={"chat_id": cid, "caption": caption},
-                files={"photo": ("checkin.jpg", photo_bytes, "image/jpeg")},
-                timeout=10)
+                files={"photo": ("checkin.jpg", photo_bytes, "image/jpeg")}, timeout=10
+            )
         except Exception as e:
-            print(f"[TG PHOTO ERROR] {e}")
-
-# ── Helpers ───────────────────────────────────────────────
-def get_db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
+            print(f"[TG PHOTO] {e}")
 
 def get_month_key(dt):
     return f"{dt.year}-M{dt.month:02d}"
@@ -89,243 +102,214 @@ def get_month_key(dt):
 def get_shift_times(shift, now):
     h = int(shift.split(":")[0])
     if h == 8:
-        start = now.replace(hour=8,  minute=0, second=0, microsecond=0)
-        end   = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        s = now.replace(hour=8,  minute=0, second=0, microsecond=0)
+        e = now.replace(hour=16, minute=0, second=0, microsecond=0)
     elif h == 16:
-        start = now.replace(hour=16, minute=0, second=0, microsecond=0)
-        end   = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    else:  # 00:00 night
-        if now.hour >= 20:
-            start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        else:
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = start + timedelta(hours=8)
-    return start, end
+        s = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        e = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        base = (now + timedelta(days=1)) if now.hour >= 20 else now
+        s = base.replace(hour=0, minute=0, second=0, microsecond=0)
+        e = s + timedelta(hours=8)
+    return s, e
 
 def calc_late(shift, now):
-    start, _ = get_shift_times(shift, now)
-    return max(0, int((now - start).total_seconds() / 60))
+    s, _ = get_shift_times(shift, now)
+    diff = int((now - s).total_seconds() / 60)
+    if diff <= 0 or diff > 480:
+        return 0
+    return diff
 
-def format_late(m):
+def fmt_late(m):
     if m <= 0: return "✅ On time"
     h, r = m // 60, m % 60
-    return f"⏰ {h}h {r}min late" if h > 0 else f"⏰ {m} min late"
+    return (f"⏰ {h}h {r}min late" if h else f"⏰ {m} min late")
 
-def format_dur(m):
-    h, r = m // 60, m % 60
-    if h > 0 and r > 0: return f"{h}h {r}min"
-    if h > 0: return f"{h}h"
-    return f"{m}min"
-
-def format_total_late(m):
+def fmt_total(m):
     if m <= 0: return "0 min"
     h, r = m // 60, m % 60
-    if h > 0 and r > 0: return f"{h}h {r}min"
-    if h > 0: return f"{h}h"
-    return f"{m} min"
+    if h and r: return f"{h}h {r}min"
+    return f"{h}h" if h else f"{m} min"
 
-# ── Routes ────────────────────────────────────────────────
+SHIFT_LABELS = {
+    "08:00": "Day: 08:00-16:00",
+    "16:00": "Main: 16:00-00:00",
+    "00:00": "Night: 00:00-08:00"
+}
+
+# ── API ───────────────────────────────────────────────────────────────────────
 
 @app.route("/employees")
 def get_employees():
     conn = get_db()
-    rows = conn.execute("SELECT id, name, shift, off_day FROM employees").fetchall()
-    conn.close()
-    return jsonify([{"id": r["id"], "name": r["name"], "shift": r["shift"],
-                     "off_day": r["off_day"] or "None"} for r in rows])
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, name, shift, off_day FROM employees")
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify([
+        {"id": r["id"], "name": r["name"], "shift": r["shift"], "off_day": r["off_day"] or "None"}
+        for r in rows
+    ])
 
 @app.route("/checkin", methods=["POST"])
 def checkin():
-    """
-    Принимает multipart/form-data:
-      - employee_id: string
-      - photo: image file
-    Сохраняет в БД, считает штраф, отправляет фото менеджерам.
-    """
-    emp_id    = request.form.get("employee_id")
+    emp_id     = request.form.get("employee_id")
     photo_file = request.files.get("photo")
-
     if not emp_id:
         return jsonify({"ok": False, "error": "employee_id required"}), 400
 
     conn = get_db()
-
-    # Найти сотрудника
-    emp = conn.execute("SELECT * FROM employees WHERE id=?", (emp_id,)).fetchone()
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM employees WHERE id=%s", (emp_id,))
+    emp = cur.fetchone()
     if not emp:
-        conn.close()
+        cur.close(); conn.close()
         return jsonify({"ok": False, "error": "Employee not found"}), 404
 
-    now      = datetime.now()
-    time_str = now.strftime("%H:%M")
-    shift    = emp["shift"]
-    name     = emp["name"]
-    shift_labels = {"08:00": "Day: 08:00-16:00", "16:00": "Main: 16:00-00:00", "00:00": "Night: 00:00-08:00"}
-    shift_label  = shift_labels.get(shift, shift)
+    now   = now_uzb()
+    shift = emp["shift"]
+    name  = emp["name"]
 
-    # Проверить нет ли уже активного check-in
-    existing = conn.execute(
-        "SELECT id FROM attendance WHERE employee_id=? AND checkout IS NULL ORDER BY id DESC LIMIT 1",
-        (emp_id,)).fetchone()
-    if existing:
-        conn.close()
+    cur.execute(
+        "SELECT id FROM attendance WHERE employee_id=%s AND checkout IS NULL ORDER BY id DESC LIMIT 1",
+        (emp_id,)
+    )
+    if cur.fetchone():
+        cur.close(); conn.close()
         return jsonify({"ok": False, "error": f"{name} already checked in"}), 409
 
-    # Off day check
-    off_day    = emp["off_day"] or "None"
-    today_name = now.strftime("%A")
-    if off_day not in ("None", "No day off") and off_day == today_name:
-        conn.close()
+    off = emp["off_day"] or "None"
+    if off not in ("None", "No day off") and off == now.strftime("%A"):
+        cur.close(); conn.close()
         return jsonify({"ok": False, "error": f"{name} has day off today"}), 403
 
-    # Shift window — разрешено за 1 час до начала
-    start, end = get_shift_times(shift, now)
-    open_from  = start - timedelta(hours=1)
-    if not (open_from <= now <= end):
-        conn.close()
-        return jsonify({"ok": False, "error": "Check-in not allowed outside shift window"}), 403
+    s, e = get_shift_times(shift, now)
+    earliest = s - timedelta(hours=2)
+    if now < earliest:
+        cur.close(); conn.close()
+        return jsonify({"ok": False, "error": f"Too early! Check-in opens at {earliest.strftime('%H:%M')}"}), 403
+    if now > e:
+        cur.close(); conn.close()
+        return jsonify({"ok": False, "error": f"Shift already ended! Was {s.strftime('%H:%M')} — {e.strftime('%H:%M')}"}), 403
 
-    # Посчитать опоздание
-    late  = calc_late(shift, now)
-    week  = get_month_key(now)
-
-    # Сохранить в БД
-    conn.execute(
-        "INSERT INTO attendance (employee_id, checkin, late, week) VALUES (?,?,?,?)",
-        (emp_id, now.isoformat(), late, week))
+    late = calc_late(shift, now)
+    week = get_month_key(now)
+    cur.execute(
+        "INSERT INTO attendance (employee_id, checkin, late, week) VALUES (%s,%s,%s,%s)",
+        (emp_id, now.isoformat(), late, week)
+    )
     conn.commit()
 
-    # Посчитать общий штраф за месяц
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    row = conn.execute(
-        "SELECT SUM(late) FROM attendance WHERE employee_id=? AND week=? AND checkin>=?",
-        (emp_id, week, month_start.isoformat())).fetchone()
-    total_monthly_late = row[0] or 0
-    total_monthly_fine = total_monthly_late
-    fine_today         = late
-    conn.close()
-
-    late_str   = format_late(late)
-    late_emoji = "🟢" if late <= 15 else "🟡" if late <= 30 else "🔴"
-
-    caption = (
-        f"{late_emoji} CHECK-IN\n\n"
-        f"👤 {name} {emp_id}\n"
-        f"📋 Shift: {shift_label}\n"
-        f"🕒 Time: {time_str}\n"
-        f"{late_str}\n"
-        f"💸 Fine today: ${fine_today}\n"
-        f"📊 Total Monthly Late: {format_total_late(total_monthly_late)}\n"
-        f"💰 Total Monthly Fine: ${total_monthly_fine}"
+    cur.execute(
+        "SELECT SUM(late) FROM attendance WHERE employee_id=%s AND checkin>=%s",
+        (emp_id, month_start.isoformat())
     )
+    total = cur.fetchone()["sum"] or 0
+    cur.close(); conn.close()
 
-    # Отправить фото или текст менеджерам
+    late_status = f"⏰ Late: {late} min  💸 Fine: ${late}" if late > 0 else "✅ On time"
+    cap = (
+        f"🟢 CHECK-IN\n\n👤 {name} {emp_id}\n📋 Shift: {SHIFT_LABELS.get(shift, shift)}\n"
+        f"🕒 Time: {now.strftime('%H:%M')}\n{late_status}\n"
+        f"📊 Monthly late: {fmt_total(total)}\n💰 Monthly fine: ${total}"
+    )
     if photo_file:
-        photo_bytes = photo_file.read()
-        tg_photo(photo_bytes, caption)
+        tg_photo(photo_file.read(), cap)
     else:
-        tg_send(caption)
+        tg_send(cap)
 
-    return jsonify({
-        "ok": True,
-        "late": late,
-        "fine_today": fine_today,
-        "total_monthly_late": total_monthly_late,
-        "total_monthly_fine": total_monthly_fine
-    })
-
+    return jsonify({"ok": True, "late": late, "fine_today": late,
+                    "total_monthly_late": total, "total_monthly_fine": total})
 
 @app.route("/checkout", methods=["POST"])
 def checkout():
-    """
-    Принимает JSON: { "employee_id": "#J660" }
-    Закрывает запись в БД, отправляет уведомление менеджерам.
-    """
     data   = request.get_json() or {}
     emp_id = data.get("employee_id")
-
     if not emp_id:
         return jsonify({"ok": False, "error": "employee_id required"}), 400
 
     conn = get_db()
-    emp  = conn.execute("SELECT * FROM employees WHERE id=?", (emp_id,)).fetchone()
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM employees WHERE id=%s", (emp_id,))
+    emp = cur.fetchone()
     if not emp:
-        conn.close()
+        cur.close(); conn.close()
         return jsonify({"ok": False, "error": "Employee not found"}), 404
 
-    now      = datetime.now()
-    time_str = now.strftime("%H:%M")
-    shift    = emp["shift"]
-    name     = emp["name"]
-    shift_labels = {"08:00": "Day: 08:00-16:00", "16:00": "Main: 16:00-00:00", "00:00": "Night: 00:00-08:00"}
-    shift_label  = shift_labels.get(shift, shift)
+    now   = now_uzb()
+    shift = emp["shift"]
+    name  = emp["name"]
 
-    row = conn.execute(
-        "SELECT id, checkin FROM attendance WHERE employee_id=? AND checkout IS NULL ORDER BY id DESC LIMIT 1",
-        (emp_id,)).fetchone()
-
+    cur.execute(
+        "SELECT id, checkin FROM attendance WHERE employee_id=%s AND checkout IS NULL ORDER BY id DESC LIMIT 1",
+        (emp_id,)
+    )
+    row = cur.fetchone()
     if not row:
-        conn.close()
+        cur.close(); conn.close()
         return jsonify({"ok": False, "error": f"{name} has no active check-in"}), 404
 
-    record_id, checkin_str = row["id"], row["checkin"]
-    checkin_dt     = datetime.fromisoformat(checkin_str)
-    worked_minutes = int((now - checkin_dt).total_seconds() / 60)
+    ci_dt  = datetime.fromisoformat(row["checkin"])
+    worked = int((now - ci_dt).total_seconds() / 60)
+    _, e   = get_shift_times(shift, now)
+    early  = max(0, int((e - now).total_seconds() / 60)) if now < e else 0
 
-    _, end = get_shift_times(shift, now)
-    early_minutes = max(0, int((end - now).total_seconds() / 60)) if now < end else 0
-
-    if early_minutes >= 60:
-        eh, em = early_minutes // 60, early_minutes % 60
-        early_msg = f"\n⚠️ Left {eh}h {em}min early!" if em > 0 else f"\n⚠️ Left {eh}h early!"
-    elif early_minutes > 0:
-        early_msg = f"\n⚠️ Left {early_minutes} min early!"
+    if early >= 60:
+        h, m = early // 60, early % 60
+        em = f"\n⚠️ Left {h}h {m}min early!" if m else f"\n⚠️ Left {h}h early!"
+    elif early > 0:
+        em = f"\n⚠️ Left {early} min early!"
     else:
-        early_msg = ""
+        em = ""
 
-    conn.execute("UPDATE attendance SET checkout=? WHERE id=?", (now.isoformat(), record_id))
+    cur.execute("UPDATE attendance SET checkout=%s WHERE id=%s", (now.isoformat(), row["id"]))
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
 
-    wh, wm = worked_minutes // 60, worked_minutes % 60
-    text = (
-        f"🔴 CHECK-OUT\n\n"
-        f"👤 {name} {emp_id}\n"
-        f"📋 Shift: {shift_label}\n"
-        f"🕒 Time: {time_str}\n"
-        f"⏱ Worked: {wh}h {wm}min{early_msg}"
+    wh, wm = worked // 60, worked % 60
+    tg_send(
+        f"🔴 CHECK-OUT\n\n👤 {name} {emp_id}\n📋 Shift: {SHIFT_LABELS.get(shift, shift)}\n"
+        f"🕒 Time: {now.strftime('%H:%M')}\n⏱ Worked: {wh}h {wm}min{em}"
     )
-    tg_send(text)
+    return jsonify({"ok": True, "worked_minutes": worked})
 
-    return jsonify({"ok": True, "worked_minutes": worked_minutes})
+@app.route("/update_offday", methods=["POST"])
+def update_offday():
+    data    = request.get_json() or {}
+    emp_id  = data.get("employee_id")
+    off_day = data.get("off_day", "No day off")
+    if not emp_id:
+        return jsonify({"ok": False, "error": "employee_id required"}), 400
 
+    valid = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday","No day off","None"]
+    if off_day not in valid:
+        return jsonify({"ok": False, "error": "invalid off_day value"}), 400
 
-@app.route("/ping")
-def ping():
-    return jsonify({"ok": True, "time": datetime.now().isoformat()})
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM employees WHERE id=%s", (emp_id,))
+    emp = cur.fetchone()
+    if not emp:
+        cur.close(); conn.close()
+        return jsonify({"ok": False, "error": "Employee not found"}), 404
 
-def keep_alive():
-    url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:5000")
-    while True:
-        time.sleep(600)  # 10 минут
-        try:
-            requests.get(f"{url}/ping", timeout=10)
-            print(f"[KEEP-ALIVE] Pinged at {datetime.now().strftime('%H:%M:%S')}")
-        except Exception as e:
-            print(f"[KEEP-ALIVE ERROR] {e}")
+    cur.execute("UPDATE employees SET off_day=%s WHERE id=%s", (off_day, emp_id))
+    conn.commit()
+    cur.close(); conn.close()
 
-def run_bots():
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from aiogram import Bot, Dispatcher
-    import bot as bot_module
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(bot_module.main())
+    tg_send(f"📅 OFF DAY UPDATED\n\n👤 {emp['name']} {emp_id}\n🗓 Off day: {off_day}")
+    return jsonify({"ok": True, "employee_id": emp_id, "off_day": off_day})
+
+# ── React Frontend ─────────────────────────────────────────────────────────────
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_react(path):
+    target = os.path.join(BUILD_DIR, path)
+    if path and os.path.exists(target):
+        return send_from_directory(BUILD_DIR, path)
+    return send_from_directory(BUILD_DIR, "index.html")
 
 if __name__ == "__main__":
-    threading.Thread(target=keep_alive, daemon=True).start()
-    threading.Thread(target=run_bots, daemon=True).start()
-    print("✅ Server + Bots started")
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    print("✅ Server → http://localhost:5000")
+    app.run(host="0.0.0.0", port=5000, debug=False)
