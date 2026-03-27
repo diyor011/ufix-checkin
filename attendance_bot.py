@@ -13,10 +13,9 @@ MANAGER_CHAT_ID  = 5952683615
 MANAGER_CHAT_ID2 = 39730332
 MANAGER_IDS = [8473394162]
 
-# ── Замени [YOUR-PASSWORD] на свой пароль ─────────────────────────────────────
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql://postgres:[YOUR-PASSWORD]@db.vwqsjayrinopywfmbuib.supabase.co:5432/postgres"
+    "postgresql://postgres:@db.vwqsjayrinopywfmbuib.supabase.co:5432/postgres"
 )
 
 worker_bot  = Bot(token=WORKER_BOT_TOKEN)
