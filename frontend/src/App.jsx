@@ -371,30 +371,30 @@ function HomePage({employees,dispatch}){
     {key:"00:00",name:"NIGHT",time:"00:00 — 08:00",color:"var(--blue)",  shadow:"rgba(79,195,247,.08)",border:"rgba(79,195,247,.2)"},
   ];
   return(
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"calc(100vh - 73px)",gap:24,padding:"32px 24px",position:"relative",zIndex:1}}>
-      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:72,letterSpacing:8,textAlign:"center",lineHeight:1}}>SELECT <span style={{color:"var(--yellow)"}}>SHIFT</span></div>
-      <div className="shift-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:20,width:"100%",maxWidth:1100,flex:1}}>
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 73px)",padding:"20px 24px 20px",position:"relative",zIndex:1,gap:16}}>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:64,letterSpacing:8,textAlign:"center",lineHeight:1,flexShrink:0}}>SELECT <span style={{color:"var(--yellow)"}}>SHIFT</span></div>
+      <div className="shift-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,width:"100%",flex:1,minHeight:0}}>
         {SHIFTS.map(s=>{
           const [hov,setHov]=useState(false);
+          const rgb=s.name==="DAY"?"74,222,128":s.name==="MAIN"?"251,191,36":"56,189,248";
           return(
             <div key={s.key} className="shift-card" onClick={()=>dispatch(ac.openShift(s.key))} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
-              style={{position:"relative",overflow:"hidden",background:hov?`rgba(${s.name==="DAY"?"74,222,128":s.name==="MAIN"?"251,191,36":"56,189,248"},.05)`:"rgba(255,255,255,.02)",border:`1px solid ${hov?"rgba(255,255,255,.22)":"rgba(255,255,255,.08)"}`,padding:"52px 40px 44px",cursor:"pointer",transition:"all .3s cubic-bezier(.22,1,.36,1)",textAlign:"left",borderRadius:24,transform:hov?"translateY(-8px) scale(1.02)":"none",boxShadow:hov?"0 32px 64px rgba(0,0,0,.5)":"none",display:"flex",flexDirection:"column",justifyContent:"space-between",minHeight:320}}>
-              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${s.color},transparent)`,transform:hov?"scaleX(1)":"scaleX(0)",transformOrigin:"left",transition:"transform .35s"}}/>
-              <div>
-                <div style={{fontSize:11,letterSpacing:5,textTransform:"uppercase",color:s.color,opacity:.85,marginBottom:20,fontWeight:600}}>{s.name==="DAY"?"Morning":s.name==="MAIN"?"Afternoon":"Overnight"}</div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontSize:52,fontWeight:800,letterSpacing:-1,marginBottom:8,lineHeight:1,color:hov?"#fff":"rgba(255,255,255,.92)"}}>{s.name.charAt(0)+s.name.slice(1).toLowerCase()}</div>
-                <div style={{fontFamily:"'Space Mono',monospace",fontSize:13,color:"rgba(255,255,255,.35)",letterSpacing:2,marginBottom:28}}>{s.time}</div>
-                <div style={{width:hov?72:28,height:3,background:s.color,borderRadius:2,transition:"width .35s",boxShadow:hov?`0 0 12px ${s.color}`:"none"}}></div>
-              </div>
-              <div style={{marginTop:32,fontSize:13,color:"rgba(255,255,255,.4)",letterSpacing:1,fontFamily:"'Space Mono',monospace"}}>{counts[s.key]} employees</div>
+              style={{position:"relative",overflow:"hidden",background:hov?`rgba(${rgb},.06)`:"rgba(255,255,255,.025)",border:`1px solid ${hov?`rgba(${rgb},.35)`:"rgba(255,255,255,.08)"}`,padding:"0 48px",cursor:"pointer",transition:"all .3s cubic-bezier(.22,1,.36,1)",textAlign:"left",borderRadius:28,transform:hov?"scale(1.015)":"none",boxShadow:hov?`0 28px 60px rgba(0,0,0,.5),0 0 0 1px rgba(${rgb},.2)`:"none",display:"flex",flexDirection:"column",justifyContent:"center",height:"100%"}}>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:4,background:`linear-gradient(90deg,${s.color},transparent)`,opacity:hov?1:.4,transition:"opacity .3s"}}/>
+              <div style={{position:"absolute",bottom:0,left:0,right:0,height:80,background:`linear-gradient(0deg,rgba(${rgb},.04),transparent)`,pointerEvents:"none"}}/>
+              <div style={{fontSize:12,letterSpacing:5,textTransform:"uppercase",color:s.color,opacity:.9,marginBottom:18,fontWeight:600}}>{s.name==="DAY"?"Morning":s.name==="MAIN"?"Afternoon":"Overnight"}</div>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:72,fontWeight:800,letterSpacing:-2,marginBottom:6,lineHeight:1,color:hov?"#fff":"rgba(255,255,255,.9)"}}>{s.name.charAt(0)+s.name.slice(1).toLowerCase()}</div>
+              <div style={{fontFamily:"'Space Mono',monospace",fontSize:15,color:"rgba(255,255,255,.3)",letterSpacing:2,marginBottom:32}}>{s.time}</div>
+              <div style={{width:hov?80:32,height:3,background:s.color,borderRadius:2,transition:"width .4s",boxShadow:hov?`0 0 16px ${s.color}`:"none",marginBottom:28}}></div>
+              <div style={{fontSize:14,color:"rgba(255,255,255,.35)",letterSpacing:1,fontFamily:"'Space Mono',monospace"}}>{counts[s.key]} employees</div>
             </div>
           );
         })}
       </div>
-      <div style={{width:"100%",maxWidth:1100}}>
+      <div style={{width:"100%",flexShrink:0}}>
         {(()=>{const [hov,setHov]=useState(false);return(
           <button onClick={()=>dispatch(ac.openSchedule())} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
-            style={{width:"100%",padding:"22px 20px",border:`1px solid ${hov?"rgba(165,180,252,.6)":"rgba(165,180,252,.25)"}`,background:hov?"rgba(165,180,252,.12)":"rgba(165,180,252,.06)",cursor:"pointer",fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800,letterSpacing:6,color:hov?"#c7d2fe":"#a5b4fc",transition:"all .25s",display:"flex",alignItems:"center",justifyContent:"center",gap:12,borderRadius:18,boxShadow:hov?"0 0 32px rgba(165,180,252,.15)":"none",textTransform:"uppercase"}}>
+            style={{width:"100%",padding:"26px 20px",border:`1px solid ${hov?"rgba(165,180,252,.6)":"rgba(165,180,252,.22)"}`,background:hov?"rgba(165,180,252,.13)":"rgba(165,180,252,.06)",cursor:"pointer",fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,letterSpacing:8,color:hov?"#d4dcff":"#a5b4fc",transition:"all .25s",display:"flex",alignItems:"center",justifyContent:"center",borderRadius:20,boxShadow:hov?"0 0 40px rgba(165,180,252,.15)":"none",textTransform:"uppercase"}}>
             SCHEDULE
           </button>
         );})()}
